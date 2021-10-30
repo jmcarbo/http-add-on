@@ -3,38 +3,43 @@ package k8s
 import (
 	"context"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
-// DeleteDeployment deletes the deployment given using the client given
-func DeleteDeployment(ctx context.Context, namespace, name string, cl client.Client) error {
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-	}
-	if err := cl.Delete(ctx, deployment, &client.DeleteOptions{}); err != nil {
-		return err
-	}
-	return nil
+type DeploymentLister interface {
+	List(ctx context.Context, options metav1.ListOptions) (*appsv1.DeploymentList, error)
 }
 
-// NewDeployment creates a new deployment object
+// DeploymentLister knows how to watch deployments. This interface is
+// implemented by Kubernetes client-go
+type DeploymentWatcher interface {
+	Watch(ctx context.Context, options metav1.ListOptions) (watch.Interface, error)
+}
+
+// DeploymentListerWatcher knows how to list and watch deployments. This
+// interface is implemented by Kubernetes client-go
+type DeploymentListerWatcher interface {
+	DeploymentLister
+	DeploymentWatcher
+}
+
+// newDeployment creates a new deployment object
 // with the given name and the given image. This does not actually create
 // the deployment in the cluster, it just creates the deployment object
 // in memory
-func NewDeployment(
+//
+// this function is only used in tests
+func newDeployment(
 	namespace,
 	name,
 	image string,
 	ports []int32,
 	env []corev1.EnvVar,
 	labels map[string]string,
+	pullPolicy corev1.PullPolicy,
 ) *appsv1.Deployment {
 	containerPorts := make([]corev1.ContainerPort, len(ports))
 	for i, port := range ports {
@@ -55,7 +60,7 @@ func NewDeployment(
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
-			Replicas: int32P(1),
+			Replicas: Int32P(1),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
@@ -65,7 +70,7 @@ func NewDeployment(
 						{
 							Image:           image,
 							Name:            name,
-							ImagePullPolicy: "Always",
+							ImagePullPolicy: pullPolicy,
 							Ports:           containerPorts,
 							Env:             env,
 						},

@@ -6,63 +6,197 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	"os"
 	"time"
 
-	"github.com/kedacore/http-add-on/pkg/env"
+	"github.com/go-logr/logr"
+	kedahttp "github.com/kedacore/http-add-on/pkg/http"
 	"github.com/kedacore/http-add-on/pkg/k8s"
-	externalscaler "github.com/kedacore/http-add-on/scaler/gen/scaler"
+	pkglog "github.com/kedacore/http-add-on/pkg/log"
+	"github.com/kedacore/http-add-on/pkg/queue"
+	"github.com/kedacore/http-add-on/pkg/routing"
+	externalscaler "github.com/kedacore/http-add-on/proto"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
 
 func main() {
-	// The port to run this scaler server on
-	portStr, err := env.Get("KEDA_HTTP_SCALER_PORT")
+	lggr, err := pkglog.NewZapr()
 	if err != nil {
-		log.Fatalf("KEDA_HTTP_SCALER_PORT not found")
+		log.Fatalf("error creating new logger (%v)", err)
 	}
-	// The namespace that the interceptors service is in
-	namespace, err := env.Get("KEDA_HTTP_SCALER_TARGET_ADMIN_NAMESPACE")
-	if err != nil {
-		log.Fatalf("KEDA_HTTP_SCALER_TARGET_ADMIN_NAMESPACE not found")
-	}
-	// The name of the interceptor service that has the queue size ("/queue") endpoint on
-	svcName, err := env.Get("KEDA_HTTP_SCALER_TARGET_ADMIN_SERVICE")
-	if err != nil {
-		log.Fatalf("KEDA_HTTP_SCALER_TARGET_ADMIN_SERVICE not found")
-	}
-	// The port that the interceptor service is on
-	targetPortStr, err := env.Get("KEDA_HTTP_SCALER_TARGET_ADMIN_PORT")
-	if err != nil {
-		log.Fatalf("KEDA_HTTP_SCALER_TARGET_ADMIN_PORT not found")
-	}
+	ctx, done := context.WithCancel(
+		context.Background(),
+	)
+	defer done()
+	cfg := mustParseConfig()
+	grpcPort := cfg.GRPCPort
+	healthPort := cfg.HealthPort
+	namespace := cfg.TargetNamespace
+	svcName := cfg.TargetService
+	targetPortStr := fmt.Sprintf("%d", cfg.TargetPort)
+	targetPendingRequests := cfg.TargetPendingRequests
+	targetPendingRequestsInterceptor := cfg.TargetPendingRequestsInterceptor
+
 	k8sCl, _, err := k8s.NewClientset()
 	if err != nil {
-		log.Fatalf("Couldn't get a Kubernetes client (%s)", err)
+		lggr.Error(err, "getting a Kubernetes client")
+		os.Exit(1)
 	}
-	pinger := newQueuePinger(
+	pinger, err := newQueuePinger(
 		context.Background(),
-		k8sCl,
+		lggr,
+		k8s.EndpointsFuncForK8sClientset(k8sCl),
 		namespace,
 		svcName,
 		targetPortStr,
-		time.NewTicker(500*time.Millisecond),
 	)
-	log.Fatal(startGrpcServer(portStr, pinger))
+	if err != nil {
+		lggr.Error(err, "creating a queue pinger")
+		os.Exit(1)
+	}
+
+	table := routing.NewTable()
+
+	grp, ctx := errgroup.WithContext(ctx)
+
+	grp.Go(func() error {
+		defer done()
+		return pinger.start(
+			ctx,
+			time.NewTicker(cfg.QueueTickDuration),
+		)
+	})
+
+	grp.Go(func() error {
+		defer done()
+		return startGrpcServer(
+			ctx,
+			lggr,
+			grpcPort,
+			pinger,
+			table,
+			int64(targetPendingRequests),
+			int64(targetPendingRequestsInterceptor),
+		)
+	})
+
+	grp.Go(func() error {
+		defer done()
+		return routing.StartConfigMapRoutingTableUpdater(
+			ctx,
+			lggr,
+			cfg.UpdateRoutingTableDur,
+			k8sCl.CoreV1().ConfigMaps(cfg.TargetNamespace),
+			table,
+			// we don't care about the queue here.
+			// we just want to update the routing table
+			// so that the scaler can use it to determine
+			// the target metrics for given hosts.
+			queue.NewMemory(),
+		)
+	})
+	grp.Go(func() error {
+		defer done()
+		return startHealthcheckServer(
+			ctx,
+			lggr,
+			cfg,
+			healthPort,
+			pinger,
+		)
+	})
+	lggr.Error(grp.Wait(), "one or more of the servers failed")
 }
 
-func startGrpcServer(port string, pinger *queuePinger) error {
-	addr := fmt.Sprintf("0.0.0.0:%s", port)
-	log.Printf("Serving external scaler on %s", addr)
+func startGrpcServer(
+	ctx context.Context,
+	lggr logr.Logger,
+	port int,
+	pinger *queuePinger,
+	routingTable *routing.Table,
+	targetPendingRequests int64,
+	targetPendingRequestsInterceptor int64,
+) error {
+
+	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	lggr.Info("starting grpc server", "address", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return err
 	}
+
 	grpcServer := grpc.NewServer()
-	externalscaler.RegisterExternalScalerServer(grpcServer, newImpl(pinger))
+	externalscaler.RegisterExternalScalerServer(
+		grpcServer,
+		newImpl(
+			lggr,
+			pinger,
+			routingTable,
+			targetPendingRequests,
+			targetPendingRequestsInterceptor,
+		),
+	)
 	reflection.Register(grpcServer)
+	go func() {
+		<-ctx.Done()
+		lis.Close()
+	}()
 	return grpcServer.Serve(lis)
+}
+
+func startHealthcheckServer(
+	ctx context.Context,
+	lggr logr.Logger,
+	cfg *config,
+	port int,
+	pinger *queuePinger,
+) error {
+	lggr = lggr.WithName("startHealthcheckServer")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/queue", func(w http.ResponseWriter, r *http.Request) {
+		lggr = lggr.WithName("route.counts")
+		cts := pinger.counts()
+		lggr.Info("counts endpoint", "counts", cts)
+		if err := json.NewEncoder(w).Encode(&cts); err != nil {
+			lggr.Error(err, "writing counts information to client")
+			w.WriteHeader(500)
+		}
+	})
+	mux.HandleFunc("/queue_ping", func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		lggr := lggr.WithName("route.counts_ping")
+		if err := pinger.fetchAndSaveCounts(ctx); err != nil {
+			lggr.Error(err, "requesting counts failed")
+			w.WriteHeader(500)
+			w.Write([]byte("error requesting counts from interceptors"))
+			return
+		}
+		cts := pinger.counts()
+		lggr.Info("counts ping endpoint", "counts", cts)
+		if err := json.NewEncoder(w).Encode(&cts); err != nil {
+			lggr.Error(err, "writing counts data to caller")
+			w.WriteHeader(500)
+			w.Write([]byte("error writing counts data to caller"))
+		}
+	})
+
+	kedahttp.AddConfigEndpoint(lggr, mux, cfg)
+
+	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	lggr.Info("starting health check server", "addr", addr)
+	return kedahttp.ServeContext(ctx, addr, mux)
 }

@@ -6,13 +6,16 @@ There are many areas we can use contributions - ranging from code, documentation
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of contents**
+## Table of contents
 
-- [Project governance](#project-governance)
-- [Including Documentation Changes](#including-documentation-changes)
-- [Developer Certificate of Origin: Signing your work](#developer-certificate-of-origin-signing-your-work)
-  - [Every commit needs to be signed](#every-commit-needs-to-be-signed)
-  - [I didn't sign my commit, now what?!](#i-didnt-sign-my-commit-now-what)
+- [Contributing to KEDA](#contributing-to-keda)
+  - [Table of contents](#table-of-contents)
+  - [Project governance](#project-governance)
+  - [Including Documentation Changes](#including-documentation-changes)
+  - [Development Environment Setup](#development-environment-setup)
+  - [Developer Certificate of Origin: Signing your work](#developer-certificate-of-origin-signing-your-work)
+    - [Every commit needs to be signed](#every-commit-needs-to-be-signed)
+    - [I didn't sign my commit, now what?!](#i-didnt-sign-my-commit-now-what)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -22,13 +25,20 @@ You can learn about the governance of KEDA [here](https://github.com/kedacore/go
 
 ## Including Documentation Changes
 
-For any contribution you make that impacts the behavior or experience of KEDA, please open a corresponding docs request for [keda.sh](https://keda.sh) through [https://github.com/kedacore/keda-docs](https://github.com/kedacore/keda-docs).  Contributions that do not include documentation or samples will be rejected.
+For any contribution you make that impacts the behavior or experience of the KEDA HTTP Addon, please make sure you include updates to the documentation in the same pull request, and if appropriate, changes to [the KEDA main documentation repository](https://github.com/kedacore/keda-docs). Contributions that do not include documentation or samples will be rejected.
+
+## Development Environment Setup
+
+We have a comprehensive how-to document that details the setup and configuration of the development environment for this project.
+
+Please find it at [docs/developing.md](./docs/developing.md).
 
 ## Developer Certificate of Origin: Signing your work
 
 ### Every commit needs to be signed
 
 The Developer Certificate of Origin (DCO) is a lightweight way for contributors to certify that they wrote or otherwise have the right to submit the code they are contributing to the project. Here is the full text of the DCO, reformatted for readability:
+
 ```
 By making a contribution to this project, I certify that:
 
@@ -48,12 +58,14 @@ This is my commit message
 
 Signed-off-by: Random J Developer <random@developer.example.org>
 ```
+
 Git even has a `-s` command line option to append this automatically to your commit message:
+
 ```
 $ git commit -s -m 'This is my commit message'
 ```
 
-Each Pull Request is checked  whether or not commits in a Pull Request do contain a valid Signed-off-by line.
+Each Pull Request is checked whether or not commits in a Pull Request do contain a valid Signed-off-by line.
 
 ### I didn't sign my commit, now what?!
 
