@@ -1,11 +1,11 @@
 # adapted from Athens 
 # https://github.com/gomods/athens/blob/main/cmd/proxy/Dockerfile
-LABEL org.opencontainers.image.source https://github.com/jmcarbo/http-add-on
 ARG GOLANG_VERSION=1.16
 ARG GOARCH=amd64
 ARG GOOS=linux
 
 FROM golang:${GOLANG_VERSION}-alpine AS builder
+LABEL org.opencontainers.image.source https://github.com/jmcarbo/http-add-on
 
 WORKDIR $GOPATH/src/github.com/kedacore/http-add-on
 
@@ -27,6 +27,7 @@ RUN go build -a -o /bin/operator ./operator
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot
+LABEL org.opencontainers.image.source https://github.com/jmcarbo/http-add-on
 WORKDIR /
 COPY --from=builder /bin/operator .
 USER nonroot:nonroot

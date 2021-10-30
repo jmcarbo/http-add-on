@@ -1,12 +1,12 @@
 # taken from Athens
 # https://github.com/gomods/athens/blob/main/cmd/proxy/Dockerfile
-LABEL org.opencontainers.image.source https://github.com/jmcarbo/http-add-on
 ARG GOLANG_VERSION=1.16
 ARG GOARCH=amd64
 ARG GOOS=linux
 
 
 FROM golang:${GOLANG_VERSION}-alpine AS builder
+LABEL org.opencontainers.image.source https://github.com/jmcarbo/http-add-on
 
 WORKDIR $GOPATH/src/github.com/kedacore/http-add-on
 
@@ -24,6 +24,8 @@ ENV GOPROXY="https://proxy.golang.org"
 RUN go build -o /bin/scaler ./scaler
 
 FROM gcr.io/distroless/static:nonroot
+LABEL org.opencontainers.image.source https://github.com/jmcarbo/http-add-on
+
 WORKDIR /
 COPY --from=builder /bin/scaler .
 USER nonroot:nonroot
