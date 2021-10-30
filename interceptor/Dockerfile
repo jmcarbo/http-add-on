@@ -1,5 +1,6 @@
 # adapted from Athens
 # https://github.com/gomods/athens/blob/main/cmd/proxy/Dockerfile
+LABEL org.opencontainers.image.source https://github.com/jmcarbo/http-add-on
 ARG GOLANG_VERSION=1.16
 ARG GOARCH=amd64
 ARG GOOS=linux
