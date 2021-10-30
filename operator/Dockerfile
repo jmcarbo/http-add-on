@@ -3,6 +3,7 @@
 ARG GOLANG_VERSION=1.16
 ARG GOARCH=amd64
 ARG GOOS=linux
+ARG TARGETARCH
 
 FROM golang:${GOLANG_VERSION}-alpine AS builder
 LABEL org.opencontainers.image.source https://github.com/jmcarbo/http-add-on
@@ -18,7 +19,8 @@ COPY . .
 ENV GO111MODULE=on
 ENV CGO_ENABLED=0
 ENV GOOS=${GOOS}
-ENV GOARCH=${GOARCH}
+#ENV GOARCH=${GOARCH}
+ENV GOARCH=${TARGETARCH}
 ENV GOPROXY="https://proxy.golang.org"
 
 # Build
